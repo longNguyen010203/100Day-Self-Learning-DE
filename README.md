@@ -1,4 +1,4 @@
-# 🎓 100Day-Self-Learning-DE
+# 🎓 100Day-Self-Learning-DE ️🎯
 Self-study process for more than 3 months to prepare for the journey of applying for an intern or fresher position as a Data Engineer in 2024
 
 ## 🔦 Study roadmap
