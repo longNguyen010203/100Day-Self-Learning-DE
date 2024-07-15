@@ -1,2 +1,4 @@
 data/
 postgresql/
+
+.de-venv/
