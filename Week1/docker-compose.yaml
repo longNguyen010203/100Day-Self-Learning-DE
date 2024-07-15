@@ -1,0 +1,28 @@
+version: '3.9'
+
+
+services:
+
+  # PostgreSQL
+  psql_database:
+    image: postgres:13
+    container_name: psql_database
+    volumes:
+      - ./postgresql:/var/lib/postgresql/data
+    ports:
+      - 5432:5432
+    environment:
+      - POSTGRES_HOST=psql_database
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=nyc_taxi
+      - POSTGRES_USER=root
+      - POSTGRES_PASSWORD=root123
+      - POSTGRES_HOST_AUTH_METHOD=trust
+    networks:
+      - de_network
+
+
+networks:     
+  de_network:
+    driver: bridge
+    name: de_network
