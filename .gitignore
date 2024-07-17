@@ -2,3 +2,8 @@ data/
 postgresql/
 
 .de-venv/
+
+logs/
+config/
+
+__pycache__/
