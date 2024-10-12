@@ -14,6 +14,20 @@ from airflow.providers.snowflake.hooks.snowflake import SnowflakeHook
 
 
 
+DATABASE_NAME_POSTGRES="dvdrental"
+SCHEMA_NAME="mart"
+TABLE_NAME="dim_CustomerInforDetail"
+EXTRACT_DATA_POSTGRES=f"""SELECT * FROM {SCHEMA_NAME}."{TABLE_NAME}" LIMIT 100;"""
+
+TABLE_NAME_SNOW="CUSTOMER_DETAIL"
+DATABASE_NAME="WAREHOUSE"
+STAGE_NAME="DVD_STAGE"
+SCHEMA_NAME_SNOW="ECOMMERCE"
+FILE_FORMAT_NAME="dvd_format"
+SNOWFLAKE_CONN_ID="snowflake_conn_id"
+
+
+# Define the DAG
 default_args = {
     'owner': 'longdata',
     'retries': 3,
@@ -24,23 +38,13 @@ default_args = {
     'email': ['myemail@domain.com']
 }
 
-DATABASE_NAME_POSTGRES="dvdrental"
-SCHEMA_NAME="mart"
-TABLE_NAME="dim_CustomerInforDetail"
-EXTRACT_DATA_POSTGRES=f"""SELECT * FROM {SCHEMA_NAME}."{TABLE_NAME}" LIMIT 100;"""
-
-TABLE_NAME_SNOW="CUSTOMER_DETAIL"
-DATABASE_NAME="DVDRENTAL"
-SCHEMA_NAME_SNOW="STAGING"
-SNOWFLAKE_CONN_ID="snowflake_conn_id"
-
 
 @dag(
-    dag_id="postgres_to_snowflake_v43",
+    dag_id="postgres_to_snowflake_v66",
     default_args=default_args,
     start_date=datetime(2024, 10, 1),
     schedule_interval="0 23 * * Mon,Wed,Fri",
-    tags=["TaskFlow", "ETL", "Data Engineer"],
+    tags=["PostgreSQL", "ETL", "Data Engineer", "Snowflake"],
     catchup=False
 )
 def etl_pipeline_postgres_to_snowflake() -> None:
@@ -68,18 +72,17 @@ def etl_pipeline_postgres_to_snowflake() -> None:
         snowflake_conn_id=SNOWFLAKE_CONN_ID,
         sql=f"""
             CREATE OR REPLACE TABLE {DATABASE_NAME}.{SCHEMA_NAME_SNOW}.{TABLE_NAME_SNOW} (
-                customer_id INT NOT NULL,
-                customer_fullname STRING NOT NULL,
-                email_of_customer VARCHAR(50) NOT NULL,
-                address_of_customer VARCHAR(50) NOT NULL,
-                active_bool BOOLEAN NOT NULL,
-                create_date DATE NOT NULL,
-                phone_of_customer VARCHAR(20) NOT NULL,
-                district VARCHAR(20) NOT NULL,
-                postal_code VARCHAR(10) NOT NULL,
-                city_customer VARCHAR(50) NOT NULL,
-                country_customer VARCHAR(50) NOT NULL,
-                primary key (customer_id)
+                customer_id INT,
+                customer_fullname STRING(256),
+                email_of_customer STRING(256),
+                address_of_customer STRING(256),
+                active_bool BOOLEAN,
+                create_date DATE,
+                phone_of_customer STRING(20),
+                district STRING(20),
+                postal_code STRING(10),
+                city_customer STRING(50),
+                country_customer STRING(50)
             );
         """
     )
@@ -157,6 +160,7 @@ def etl_pipeline_postgres_to_snowflake() -> None:
         )
         df.to_csv(tmp_file_path, index=False)
         context["ti"].xcom_push(key="tmp_file_path2", value=tmp_file_path)
+        context["ti"].xcom_push(key="tmp_file_path3", value=tmp_file_path[17:])
         
         return {
             "Record number": df.shape[0],
@@ -174,20 +178,47 @@ def etl_pipeline_postgres_to_snowflake() -> None:
     #     cursor.execute()
     
     
-    #------------------------------------#
-    # Load data transformed to Snowflake #
-    #------------------------------------#
+    #--------------------#
+    # create file format #
+    #--------------------#
+    create_file_format = SnowflakeOperator(
+        task_id="create_file_format",
+        snowflake_conn_id="snowflake_conn_id",
+        sql=f"""
+            USE DATABASE {DATABASE_NAME};
+            USE SCHEMA {SCHEMA_NAME_SNOW};
+            CREATE OR REPLACE FILE FORMAT {FILE_FORMAT_NAME} 
+            TYPE = 'CSV' FIELD_OPTIONALLY_ENCLOSED_BY='"' SKIP_HEADER=1;
+        """
+    )
+    
+    #--------------------#
+    # create stage table #
+    #--------------------#
+    create_stage_table = SnowflakeOperator(
+        task_id="create_stage_table",
+        snowflake_conn_id="snowflake_conn_id",
+        sql=f"""
+            USE DATABASE {DATABASE_NAME};
+            USE SCHEMA {SCHEMA_NAME_SNOW};
+            CREATE OR REPLACE STAGE {STAGE_NAME};
+        """
+    )
+    
+    #--------------------------------#
+    # put data file into stage table #
+    #--------------------------------#
     put_data_to_stage_in_snowflake = SnowflakeOperator(
         task_id="put_data_to_stage_in_snowflake",
         snowflake_conn_id="snowflake_conn_id",
         sql="""
             PUT file://{{ ti.xcom_pull(key='tmp_file_path2') }} 
-            @{{ params.database_name }}.{{ params.schema_name_snow }}.{{ params.table_name_snow }};
+            @{{ params.database_name }}.{{ params.schema_name_snow }}.{{ params.stage_name }};
         """,
         params={
             "database_name": DATABASE_NAME,
             "schema_name_snow": SCHEMA_NAME_SNOW,
-            "table_name_snow": TABLE_NAME_SNOW
+            "stage_name": STAGE_NAME
         }
     )
     
@@ -197,28 +228,29 @@ def etl_pipeline_postgres_to_snowflake() -> None:
     load_data_into_snowflake_from_file = SnowflakeOperator(
         task_id="load_data_into_snowflake_from_file",
         snowflake_conn_id="snowflake_conn_id",
-        sql="""
-            COPY INTO {{ params.database_name }}.
-                      {{ params.schema_name_snow }}.
-                      {{ params.table_name_snow }}
-            FROM @{{ ti.xcom_pull(key='tmp_file_path2') }}
-            FILE_FORMAT = (
-                TYPE = 'CSV', 
-                FIELD_OPTIONALLY_ENCLOSED_BY='"', 
-                SKIP_HEADER=1
-            )
-            VALIDATION_MODE = RETURN_ALL_ERRORS; """,
+        sql=f"""
+            USE SCHEMA {DATABASE_NAME}.{SCHEMA_NAME_SNOW};
+        
+            COPY INTO {DATABASE_NAME}.
+                      {SCHEMA_NAME_SNOW}.
+                      {TABLE_NAME_SNOW}
+            FROM @{DATABASE_NAME}.{SCHEMA_NAME_SNOW}.{STAGE_NAME}
+            FILE_FORMAT = {DATABASE_NAME}.{SCHEMA_NAME_SNOW}.{FILE_FORMAT_NAME}
+            PURGE = TRUE;
+        """,
         params={
             "database_name": DATABASE_NAME,
             "schema_name_snow": SCHEMA_NAME_SNOW,
-            "table_name_snow": TABLE_NAME_SNOW
+            "table_name_snow": TABLE_NAME_SNOW,
+            "stage_name": STAGE_NAME
         }
     )
     
     
     create_schema_snowflake >> create_table_snowflake >> load_data_into_snowflake_from_file
-    extract_data_from_postgres() >> transform_data_extracted() >> load_data_into_snowflake_from_file
-    create_table_snowflake >> put_data_to_stage_in_snowflake
+    extract_data_from_postgres() >> transform_data_extracted() >> put_data_to_stage_in_snowflake
+    create_table_snowflake >> create_stage_table >> put_data_to_stage_in_snowflake
     put_data_to_stage_in_snowflake >> load_data_into_snowflake_from_file
+    create_file_format >> put_data_to_stage_in_snowflake
      
 etl_pipeline_postgres_to_snowflake()
