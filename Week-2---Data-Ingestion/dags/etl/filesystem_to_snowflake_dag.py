@@ -34,7 +34,7 @@ default_args = {
 
 
 @dag(
-    dag_id="filesystem_to_snowflake_v100",
+    dag_id="filesystem_to_snowflake_v101",
     default_args=default_args,
     start_date=datetime(2024, 10, 1),
     schedule_interval="0 23 * * Mon,Wed,Fri",
